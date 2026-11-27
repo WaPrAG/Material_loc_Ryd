@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Material Location Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--text:#0f172a;--muted:#64748b;--card:#fff;--line:#e2e8f0;--accent:#059669;--accent-d:#047857;--soft:#ecfdf5;--warn:#b45309;--bad:#b91c1c}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(135deg,#ecfdf5,#f8fafc 45%,#eef2ff);color:var(--text);min-height:100vh}
+.app-shell{max-width:1200px;margin:0 auto;padding:20px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.topbar h1{font-size:22px;margin:0;font-weight:700}
+.topbar p{margin:2px 0 0;color:var(--muted);font-size:14px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+button,.btn{font:inherit;font-size:14px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--text);padding:9px 14px;border-radius:10px;cursor:pointer}
+button.primary,.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{background:var(--accent-d)}
+button:focus-visible,input:focus-visible{outline:3px solid #6ee7b7;outline-offset:2px}
+.scan-layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20px;align-items:start}
+@media(max-width:820px){.scan-layout{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.scan-box{display:flex;gap:8px}
+.scan-box input{flex:1;font:inherit;font-size:18px;padding:14px 16px;border:2px solid var(--accent);border-radius:12px;min-width:0}
+.hint{color:var(--muted);font-size:13px;margin:8px 0 0}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-top:14px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--accent)}
+.detail{margin-top:16px;border-radius:14px;padding:18px;background:var(--soft);border:1px solid #a7f3d0}
+.detail.miss{background:#fef2f2;border-color:#fecaca}
+.detail h2{margin:0 0 4px;font-size:20px}
+.loc{display:inline-block;margin:10px 0;padding:8px 14px;border-radius:10px;background:var(--text);color:#fff;font-weight:700;font-size:18px}
+dl{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;margin:10px 0 0;font-size:14px}
+dt{color:var(--muted)}dd{margin:0;font-weight:500}
+.results-list{display:flex;flex-direction:column;gap:8px;max-height:70vh;overflow:auto}
+.search-row input{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:12px}
+.item{text-align:left;width:100%;display:flex;justify-content:space-between;gap:10px;padding:12px;border-radius:12px;background:#f8fafc}
+.item:hover{border-color:var(--accent)}
+.item b{display:block;font-size:14px}.item span{color:var(--muted);font-size:12px}
+.item .l{font-weight:700;font-size:13px;white-space:nowrap;color:var(--accent-d)}
+.empty{color:var(--muted);font-size:14px;padding:16px 4px}
+.drop{border:2px dashed #94a3b8;border-radius:14px;padding:14px;text-align:center;font-size:13px;color:var(--muted);margin-top:16px}
+.drop.over{border-color:var(--accent);background:var(--soft)}
+</style>
+</head>
+<body>
+<main class="app-shell">
+  <header class="topbar">
+    <div>
+      <h1>Material Location Tracker</h1>
+      <p>Scan a barcode to see where a material is stored.</p>
+    </div>
+    <div class="actions">
+      <button id="tplBtn">Download template</button>
+      <button id="sampleBtn">Load sample data</button>
+      <label class="btn primary" for="fileIn">Upload data (CSV / Excel)</label>
+      <input id="fileIn" type="file" accept=".csv,.xlsx,.xls" hidden>
+    </div>
+  </header>
+
+  <section class="scan-layout">
+    <div class="panel">
+      <div class="scan-box">
+        <input id="scanInput" type="text" placeholder="Scan or type a code, then press Enter" autocomplete="off" autofocus>
+        <button class="primary" id="goBtn">Find</button>
+      </div>
+      <p class="hint">Barcode scanners type the code and press Enter for you. A leading 0 on the scanned code is ignored when matching.</p>
+      <div class="status"><span class="dot"></span><span id="count">0 materials loaded</span></div>
+      <div id="detail"></div>
+      <div class="drop" id="drop">Drag and drop a CSV or Excel file here</div>
+    </div>
+
+    <div class="panel">
+      <div class="search-row"><input id="q" type="search" placeholder="Search by name, code, location or category"></div>
+      <div id="searchResults" class="results-list"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+(function(){
+  var KEY='materialData.v1', data=[];
+  var FIELDS={
+    code:['code','barcode','id','sku','partno','partnumber','materialcode','itemcode'],
+    name:['name','material','materialname','description','item','itemname'],
+    location:['location','bin','rack','shelf','storage','place','binlocation'],
+    category:['category','type','group'],
+    quantity:['quantity','qty','stock','onhand'],
+    unit:['unit','uom'],
+    notes:['notes','remarks','note','comment','comments']
+  };
+  var LABELS={code:'Code',name:'Name',location:'Location',category:'Category',quantity:'Quantity',unit:'Unit',notes:'Notes'};
+  var SAMPLE=[
+    {code:'MAT-0001',name:'Hex bolt M10 x 50',location:'A-01-03',category:'Fasteners',quantity:'420',unit:'pcs',notes:'Zinc plated'},
+    {code:'MAT-0002',name:'Copper pipe 22mm',location:'B-02-01',category:'Plumbing',quantity:'85',unit:'m',notes:'Class 1'},
+    {code:'MAT-0003',name:'Safety gloves L',location:'C-04-02',category:'PPE',quantity:'60',unit:'pairs',notes:''},
+    {code:'MAT-0004',name:'LED panel 600x600',location:'D-01-05',category:'Electrical',quantity:'32',unit:'pcs',notes:'4000K'}
+  ];
+  var $=function(id){return document.getElementById(id)};
+  var scan=$('scanInput'), detail=$('detail'), list=$('searchResults'), q=$('q');
+
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function stripZ(s){return String(s==null?'':s).trim().replace(/^0+/,'').toLowerCase()}
+  function norm(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
+
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}}
+  function load(){try{var s=localStorage.getItem(KEY);if(s)data=JSON.parse(s)||[]}catch(e){data=[]}}
+
+  function mapRows(rows){
+    var out=[];
+    rows.forEach(function(r){
+      var o={},keys=Object.keys(r);
+      Object.keys(FIELDS).forEach(function(f){
+        for(var i=0;i<keys.length;i++){
+          if(FIELDS[f].indexOf(norm(keys[i]))>-1){o[f]=String(r[keys[i]]).trim();break}
+        }
+      });
+      if(o.code||o.name){o.code=o.code||o.name;o.name=o.name||o.code;out.push(o)}
+    });
+    return out;
+  }
+
+  function parseCSV(text){
+    var rows=[],row=[],cur='',inQ=false,i,c;
+    for(i=0;i<text.length;i++){
+      c=text[i];
+      if(inQ){
+        if(c==='"'&&text[i+1]==='"'){cur+='"';i++}
+        else if(c==='"')inQ=false;
+        else cur+=c;
+      }else if(c==='"')inQ=true;
+      else if(c===','){row.push(cur);cur=''}
+      else if(c==='\n'||c==='\r'){
+        if(c==='\r'&&text[i+1]==='\n')i++;
+        row.push(cur);cur='';
+        if(row.some(function(x){return x!==''}))rows.push(row);
+        row=[];
+      }else cur+=c;
+    }
+    row.push(cur);
+    if(row.some(function(x){return x!==''}))rows.push(row);
+    if(!rows.length)return [];
+    var head=rows.shift();
+    return rows.map(function(r){var o={};head.forEach(function(h,k){o[h]=r[k]||''});return o});
+  }
+
+  function handleFile(file){
+    if(!file)return;
+    var ext=file.name.split('.').pop().toLowerCase(), rd=new FileReader();
+    rd.onerror=function(){alert('Could not read that file.')};
+    if(ext==='csv'){
+      rd.onload=function(){setData(mapRows(parseCSV(String(rd.result).replace(/^\uFEFF/,''))))};
+      rd.readAsText(file);
+    }else{
+      if(typeof XLSX==='undefined'){alert('Excel support did not load. Save the file as CSV and upload again.');return}
+      rd.onload=function(){
+        try{
+          var wb=XLSX.read(rd.result,{type:'array'});
+          setData(mapRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''})));
+        }catch(e){alert('Could not read that Excel file.')}
+      };
+      rd.readAsArrayBuffer(file);
+    }
+  }
+
+  function setData(rows){
+    if(!rows.length){alert('No materials found. Make sure the first row has headers like Code, Name, Location.');return}
+    data=rows;save();renderList();updateCount();
+    detail.innerHTML='';scan.focus();
+  }
+
+  function updateCount(){$('count').textContent=data.length+' material'+(data.length===1?'':'s')+' loaded'}
+
+  function show(m){
+    var h='<div class="detail"><h2>'+esc(m.name)+'</h2><div>'+esc(m.code)+'</div>';
+    if(m.location)h+='<div class="loc">'+esc(m.location)+'</div>';
+    h+='<dl>';
+    ['category','quantity','unit','notes'].forEach(function(f){
+      if(m[f])h+='<dt>'+LABELS[f]+'</dt><dd>'+esc(m[f])+'</dd>';
+    });
+    detail.innerHTML=h+'</dl></div>';
+  }
+
+  function find(code){
+    var c=stripZ(code);
+    if(!c)return;
+    var m=data.filter(function(x){return stripZ(x.code)===c})[0];
+    if(m)show(m);
+    else detail.innerHTML='<div class="detail miss"><h2>Not found</h2><div>No material matches "'+esc(code)+'". Check the code or upload updated data.</div></div>';
+  }
+
+  function renderList(){
+    var t=q.value.trim().toLowerCase();
+    var rows=data.filter(function(m){
+      return !t||[m.code,m.name,m.location,m.category].join(' ').toLowerCase().indexOf(t)>-1||stripZ(m.code).indexOf(stripZ(t))>-1&&stripZ(t)!=='';
+    }).slice(0,200);
+    if(!rows.length){list.innerHTML='<div class="empty">'+(data.length?'No matches.':'No data yet. Upload a CSV or Excel file, or load the sample data.')+'</div>';return}
+    list.innerHTML=rows.map(function(m){
+      return '<button class="item" data-code="'+esc(m.code)+'"><div><b>'+esc(m.name)+'</b><span>'+esc(m.code)+(m.category?' · '+esc(m.category):'')+'</span></div><div class="l">'+esc(m.location)+'</div></button>';
+    }).join('');
+  }
+
+  scan.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){e.preventDefault();find(scan.value);scan.select()}
+  });
+  $('goBtn').onclick=function(){find(scan.value);scan.select()};
+  q.addEventListener('input',renderList);
+  list.addEventListener('click',function(e){
+    var b=e.target.closest('.item');
+    if(b){var c=b.getAttribute('data-code');scan.value=c;find(c);window.scrollTo({top:0,behavior:'smooth'})}
+  });
+  $('fileIn').addEventListener('change',function(e){handleFile(e.target.files[0]);e.target.value=''});
+  $('sampleBtn').onclick=function(){setData(SAMPLE.slice())};
+  $('tplBtn').onclick=function(){
+    var csv='Code,Name,Location,Category,Quantity,Unit,Notes\nMAT-0001,Hex bolt M10 x 50,A-01-03,Fasteners,420,pcs,Zinc plated\n';
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download='material-template.csv';a.click();
+  };
+  var drop=$('drop');
+  ['dragover','dragenter'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add('over')})});
+  ['dragleave','drop'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove('over')})});
+  drop.addEventListener('drop',function(e){handleFile(e.dataTransfer.files[0])});
+
+  // keep the scan box ready for the scanner
+  document.addEventListener('click',function(e){
+    if(!e.target.closest('input,button,label,.btn'))scan.focus();
+  });
+
+  load();renderList();updateCount();scan.focus();
+})();
+</script>
+</body>
+</html>
