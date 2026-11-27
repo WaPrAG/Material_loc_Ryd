@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Material Location Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#059669">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -42,6 +45,7 @@ dt{color:var(--muted)}dd{margin:0;font-weight:500}
 .empty{color:var(--muted);font-size:14px;padding:16px 4px}
 .drop{border:2px dashed #94a3b8;border-radius:14px;padding:14px;text-align:center;font-size:13px;color:var(--muted);margin-top:16px}
 .drop.over{border-color:var(--accent);background:var(--soft)}
+#camWrap{margin-top:14px}#camWrap video{width:100%;border-radius:12px;background:#000;max-height:300px;object-fit:cover}#camWrap button{margin-top:8px}
 </style>
 </head>
 <body>
@@ -64,8 +68,10 @@ dt{color:var(--muted)}dd{margin:0;font-weight:500}
       <div class="scan-box">
         <input id="scanInput" type="text" placeholder="Scan or type a code, then press Enter" autocomplete="off" autofocus>
         <button class="primary" id="goBtn">Find</button>
+        <button id="camBtn" title="Scan with phone camera">Camera</button>
       </div>
       <p class="hint">Barcode scanners type the code and press Enter for you. A leading 0 on the scanned code is ignored when matching.</p>
+      <div id="camWrap" hidden><video id="cam" playsinline muted></video><button id="camStop">Close camera</button></div>
       <div class="status"><span class="dot"></span><span id="count">0 materials loaded</span></div>
       <div id="detail"></div>
       <div class="drop" id="drop">Drag and drop a CSV or Excel file here</div>
@@ -227,6 +233,22 @@ dt{color:var(--muted)}dd{margin:0;font-weight:500}
   document.addEventListener('click',function(e){
     if(!e.target.closest('input,button,label,.btn'))scan.focus();
   });
+
+  var camStream=null,camTimer=null;
+  function stopCam(){clearInterval(camTimer);if(camStream){camStream.getTracks().forEach(function(t){t.stop()});camStream=null}$('camWrap').hidden=true}
+  $('camStop').onclick=stopCam;
+  $('camBtn').onclick=async function(){
+    if(!('BarcodeDetector' in window)){alert('Camera scanning needs Chrome on Android. You can still use a scanner device or type the code.');return}
+    try{
+      var det=new BarcodeDetector();
+      camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+      var v=$('cam');v.srcObject=camStream;$('camWrap').hidden=false;await v.play();
+      camTimer=setInterval(async function(){
+        try{var r=await det.detect(v);if(r.length){var val=r[0].rawValue;scan.value=val;find(val);stopCam()}}catch(e){}
+      },300);
+    }catch(e){stopCam();alert('Could not open the camera. Allow camera permission and try again.')}
+  };
+  if('serviceWorker' in navigator&&location.protocol==='https:'){navigator.serviceWorker.register('sw.js').catch(function(){})}
 
   load();renderList();updateCount();scan.focus();
 })();
